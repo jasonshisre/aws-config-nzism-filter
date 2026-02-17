@@ -1,0 +1,42 @@
+# Build artifacts
+.aws-sam/
+backend/.package/
+frontend/dist/
+frontend/node_modules/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+backend/.venv/
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+.kiro/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# SAM
+samconfig.toml
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# Temp/test files
+test.json
+test.yaml

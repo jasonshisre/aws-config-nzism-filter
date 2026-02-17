@@ -1,0 +1,257 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: NZISM Config Filter - Serverless web application
+
+Parameters:
+  Stage:
+    Type: String
+    Default: prod
+  CloudFrontWafArn:
+    Type: String
+    Default: ''
+    Description: WAF WebACL ARN from us-east-1 stack (optional)
+  OriginVerifySecretName:
+    Type: String
+    Default: nzism-origin-verify
+    Description: Name for the origin verification secret
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 256
+    Runtime: python3.11
+
+Conditions:
+  HasCloudFrontWaf: !Not [!Equals [!Ref CloudFrontWafArn, '']]
+
+Resources:
+  # --- Origin Verification Secret ---
+  OriginVerifySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Ref OriginVerifySecretName
+      Description: Secret header value for CloudFront to API Gateway verification
+      GenerateSecretString:
+        SecretStringTemplate: '{}'
+        GenerateStringKey: headerValue
+        PasswordLength: 32
+        ExcludePunctuation: true
+
+  # --- Backend ---
+  NzismFilterFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: src.handler.lambda_handler
+      CodeUri: backend/
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: '*'
+      Events:
+        GetTemplates:
+          Type: Api
+          Properties:
+            Path: /api/templates
+            Method: get
+            RestApiId: !Ref NzismApi
+            Auth:
+              Authorizer: OriginVerifyAuthorizer
+        FilterTemplates:
+          Type: Api
+          Properties:
+            Path: /api/filter
+            Method: post
+            RestApiId: !Ref NzismApi
+            Auth:
+              Authorizer: OriginVerifyAuthorizer
+
+  # --- Origin Verify Authorizer ---
+  OriginVerifyAuthorizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Runtime: python3.11
+      Timeout: 5
+      MemorySize: 128
+      Environment:
+        Variables:
+          SECRET_ARN: !Ref OriginVerifySecret
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Ref OriginVerifySecret
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: '*'
+      InlineCode: |
+        import json
+        import os
+        import boto3
+
+        secrets_client = boto3.client('secretsmanager')
+        cached_secret = None
+
+        def get_secret():
+            global cached_secret
+            if cached_secret is None:
+                response = secrets_client.get_secret_value(SecretId=os.environ['SECRET_ARN'])
+                secret_data = json.loads(response['SecretString'])
+                cached_secret = secret_data.get('headerValue', '')
+            return cached_secret
+
+        def generate_policy(effect, resource):
+            # Use wildcard to allow all methods/paths once authorized
+            parts = resource.split('/')
+            if len(parts) >= 2:
+                resource = '/'.join(parts[:2]) + '/*'
+            return {
+                'principalId': 'cloudfront',
+                'policyDocument': {
+                    'Version': '2012-10-17',
+                    'Statement': [{
+                        'Action': 'execute-api:Invoke',
+                        'Effect': effect,
+                        'Resource': resource
+                    }]
+                }
+            }
+
+        def handler(event, context):
+            expected_value = get_secret()
+            headers = event.get('headers', {}) or {}
+            header_value = headers.get('x-origin-verify', '') or headers.get('X-Origin-Verify', '')
+            method_arn = event.get('methodArn', '*')
+            
+            if header_value == expected_value:
+                return generate_policy('Allow', method_arn)
+            return generate_policy('Deny', method_arn)
+
+  NzismApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref Stage
+      Cors:
+        AllowMethods: "'GET,POST,OPTIONS'"
+        AllowHeaders: "'Content-Type,x-origin-verify'"
+        AllowOrigin: "'*'"
+      Auth:
+        DefaultAuthorizer: OriginVerifyAuthorizer
+        Authorizers:
+          OriginVerifyAuthorizer:
+            FunctionPayloadType: REQUEST
+            FunctionArn: !GetAtt OriginVerifyAuthorizerFunction.Arn
+            Identity:
+              Headers:
+                - x-origin-verify
+
+  # --- Frontend ---
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub '${FrontendBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}'
+
+  CloudFrontOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${AWS::StackName}-oac'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # Origin Request Policy to forward necessary headers to API
+  ApiOriginRequestPolicy:
+    Type: AWS::CloudFront::OriginRequestPolicy
+    Properties:
+      OriginRequestPolicyConfig:
+        Name: !Sub '${AWS::StackName}-api-origin-policy'
+        HeadersConfig:
+          HeaderBehavior: whitelist
+          Headers:
+            - Content-Type
+        QueryStringsConfig:
+          QueryStringBehavior: all
+        CookiesConfig:
+          CookieBehavior: none
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        WebACLId: !If [HasCloudFrontWaf, !Ref CloudFrontWafArn, !Ref 'AWS::NoValue']
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !Ref CloudFrontOriginAccessControl
+            S3OriginConfig:
+              OriginAccessIdentity: ''
+          - Id: ApiOrigin
+            DomainName: !Sub '${NzismApi}.execute-api.${AWS::Region}.amazonaws.com'
+            CustomOriginConfig:
+              OriginProtocolPolicy: https-only
+            OriginPath: !Sub '/${Stage}'
+            OriginCustomHeaders:
+              - HeaderName: x-origin-verify
+                HeaderValue: !Sub '{{resolve:secretsmanager:${OriginVerifySecretName}:SecretString:headerValue}}'
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          ForwardedValues:
+            QueryString: false
+        CacheBehaviors:
+          - PathPattern: /api/*
+            TargetOriginId: ApiOrigin
+            ViewerProtocolPolicy: https-only
+            AllowedMethods: [GET, HEAD, OPTIONS, PUT, PATCH, POST, DELETE]
+            CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+            OriginRequestPolicyId: !Ref ApiOriginRequestPolicy
+        CustomErrorResponses:
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+
+Outputs:
+  ApiUrl:
+    Description: API Gateway endpoint URL
+    Value: !Sub 'https://${NzismApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}'
+  CloudFrontUrl:
+    Description: CloudFront distribution URL
+    Value: !Sub 'https://${CloudFrontDistribution.DomainName}'
+  FrontendBucketName:
+    Description: S3 bucket for frontend assets
+    Value: !Ref FrontendBucket
