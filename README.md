@@ -148,21 +148,30 @@ pytest tests/ -v
 ├── backend/
 │   ├── requirements.txt
 │   ├── src/
+│   │   ├── __init__.py
 │   │   ├── handler.py         # Lambda entry point
 │   │   ├── fetcher.py         # GitHub template fetcher
 │   │   ├── parser.py          # YAML parser + service mapper
 │   │   ├── filter.py          # Service-based rule filter
 │   │   └── generator.py       # YAML template generator
 │   └── tests/
+│       ├── __init__.py
 │       ├── test_parser.py
 │       ├── test_filter.py
 │       └── test_generator.py
 └── frontend/
     ├── package.json
     ├── index.html
+    ├── vite.config.ts         # Vite configuration
+    ├── tsconfig.json          # TypeScript configuration
+    ├── eslint.config.js       # ESLint configuration
     └── src/
+        ├── main.tsx           # Vite entry point
         ├── App.tsx
+        ├── App.css
+        ├── index.css
         ├── api/client.ts
+        ├── types/index.ts     # Shared TypeScript types
         └── components/
             ├── ServiceSelector.tsx
             └── TemplateResults.tsx
@@ -170,4 +179,4 @@ pytest tests/ -v
 
 ## License
 
-This project is open source. See [LICENSE](LICENSE) for details.
+This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
