@@ -95,8 +95,8 @@ This ensures the generated template is self-contained and deployable.
 ## Quick Start
 
 ```bash
-git clone https://github.com/your-org/nzism-config-filter.git
-cd nzism-config-filter
+git clone https://github.com/jasonshisre/aws-config-nzism-filter.git
+cd aws-config-nzism-filter
 
 # Deploy everything (WAF + Application)
 make deploy-all
