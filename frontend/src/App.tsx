@@ -111,6 +111,13 @@ function App() {
           <TemplateResults filteredTemplates={filteredTemplates} />
         </>
       )}
+
+      <footer className="app-footer">
+        <span>Open Source Project: </span>
+        <a href="https://github.com/jasonshisre/aws-config-nzism-filter" target="_blank" rel="noopener noreferrer">
+          github.com/jasonshisre/aws-config-nzism-filter
+        </a>
+      </footer>
     </div>
   );
 }
