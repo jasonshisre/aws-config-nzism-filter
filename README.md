@@ -1,6 +1,10 @@
 # NZISM Config Filter
 
-> This is a community-driven, independent open source project. It is not affiliated with, endorsed by, or officially supported by Amazon Web Services (AWS) or the New Zealand Government Communications Security Bureau (GCSB).
+> [!TIP]
+> This application is live and usable at: https://aws-config-ism-filter.org.nz/
+
+> [!NOTE]
+> This is a community-driven, independent open source project. It is not affiliated with, endorsed by, or officially supported by Amazon Web Services (AWS) or the New Zealand Government Communications Security Bureau (GCSB).```
 
 A web application that helps New Zealand public sector customers generate filtered AWS Config conformance pack templates based on the AWS services they use.
 
